@@ -102,7 +102,7 @@ class WhatsappDriver extends HttpDriver
     }
 
     /**
-     * @param  IncomingMessage $message
+     * @param IncomingMessage $message
      * @return \BotMan\BotMan\Messages\Incoming\Answer
      */
     public function getConversationAnswer(IncomingMessage $message)
@@ -111,7 +111,7 @@ class WhatsappDriver extends HttpDriver
         if (is_string($interactive)) {
             $interactive = ($interactive !== 'false') && ($interactive !== '0');
         } else {
-            $interactive = (bool) $interactive;
+            $interactive = (bool)$interactive;
         }
 
         return Answer::create($message->getText())
@@ -173,7 +173,7 @@ class WhatsappDriver extends HttpDriver
      */
     public function buildServicePayload($message, $matchingMessage, $additionalParameters = [])
     {
-        if (! $message instanceof WebAccess && ! $message instanceof OutgoingMessage) {
+        if (!$message instanceof WebAccess && !$message instanceof OutgoingMessage) {
             $this->errorMessage = 'Unsupported message type.';
             $this->replyStatusCode = 500;
         }
@@ -232,14 +232,41 @@ class WhatsappDriver extends HttpDriver
         // Reset replies
         $this->replies = [];
 
-        Response::create(json_encode([
+        $req = json_encode([
             'status' => $this->replyStatusCode,
             'messages' => $messages,
-        ]), $this->replyStatusCode, [
-            'Content-Type' => 'application/json',
-            'Access-Control-Allow-Credentials' => true,
-            'Access-Control-Allow-Origin' => '*',
-        ])->send();
+            'client' => json_decode($this->payload['client'])
+        ]);
+
+        \Log::insert(['Type' => 'HandleChat whatsapp before ', 'content' => "Api" . $req]);
+        $ch = json_decode($req);
+        if (!empty($ch->messages[0]->additionalParameters->contact_phone)) {
+            $curl = curl_init();
+            curl_setopt_array($curl, [
+                CURLOPT_URL => $ch->client->sender_url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_ENCODING => "",
+                CURLOPT_MAXREDIRS => 10,
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+                CURLOPT_CUSTOMREQUEST => "POST",
+                CURLOPT_POSTFIELDS => $req,
+                CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
+            ]);
+
+            $response = curl_exec($curl);
+            $err = curl_error($curl);
+
+            curl_close($curl);
+            if ($err) {
+                echo "cURL Error #:" . $err;
+                \Log::insert(['Type' => 'HandleChat whatsapp Error', 'content' => "cURL Error #:" . $err]);
+
+            } else {
+                \Log::insert(['Type' => 'HandleChat whatsapp success', 'content' => "Done" . $response]);
+                echo 'Done';
+            }
+        }
     }
 
     /**
@@ -333,6 +360,6 @@ class WhatsappDriver extends HttpDriver
      */
     protected function getDataURI($file, $mime = '')
     {
-        return 'data: '.(function_exists('mime_content_type') ? mime_content_type($file) : $mime).';base64,'.base64_encode(file_get_contents($file));
+        return 'data: ' . (function_exists('mime_content_type') ? mime_content_type($file) : $mime) . ';base64,' . base64_encode(file_get_contents($file));
     }
 }

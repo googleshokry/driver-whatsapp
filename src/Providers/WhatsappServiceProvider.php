@@ -25,12 +25,6 @@ class WhatsappServiceProvider extends ServiceProvider
 
             $this->mergeConfigFrom(__DIR__.'/../../stubs/whatsapp.php', 'botman.whatsapp');
         }
-
-        $this->loadRoutesFrom(__DIR__.'/../Laravel/routes.php');
-        $this->loadViewsFrom(__DIR__.'/../Laravel/views', 'botman-whatsapp');
-        $this->publishes([
-            __DIR__.'/../Laravel/views' => resource_path('views/vendor/botman-whatsapp'),
-        ]);
     }
 
     /**
