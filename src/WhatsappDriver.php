@@ -227,44 +227,47 @@ class WhatsappDriver extends HttpDriver
      */
     public function messagesHandled()
     {
-        $messages = $this->buildReply($this->replies);
+        if ($this->payload['driver'] == $this->DRIVER_NAME) {
+            $messages = $this->buildReply($this->replies);
 
-        // Reset replies
-        $this->replies = [];
+            // Reset replies
+            $this->replies = [];
 
-        $req = json_encode([
-            'status' => $this->replyStatusCode,
-            'messages' => $messages,
-            'client' => json_decode($this->payload['client'])
-        ]);
-
-        \Log::insert(['Type' => 'HandleChat whatsapp before ', 'content' => "Api" . $req]);
-        $ch = json_decode($req);
-        if (!empty($ch->messages[0]->additionalParameters->contact_phone)) {
-            $curl = curl_init();
-            curl_setopt_array($curl, [
-                CURLOPT_URL => $ch->client->sender_url,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_ENCODING => "",
-                CURLOPT_MAXREDIRS => 10,
-                CURLOPT_TIMEOUT => 30,
-                CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-                CURLOPT_CUSTOMREQUEST => "POST",
-                CURLOPT_POSTFIELDS => $req,
-                CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
+            $req = json_encode([
+                'status' => $this->replyStatusCode,
+                'messages' => $messages,
+                'client' => json_decode($this->payload['client'])
             ]);
 
-            $response = curl_exec($curl);
-            $err = curl_error($curl);
+            \App\Log::insert(['Type' => 'HandleChat whatsapp before ', 'content' => "Api" . $req]);
+            $ch = json_decode($req);
+            if (!empty($ch->messages[0]->additionalParameters->contact_phone)) {
+//            dd('dd');
+                $curl = curl_init();
+                curl_setopt_array($curl, [
+                    CURLOPT_URL => $ch->client->sender_url,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_ENCODING => "",
+                    CURLOPT_MAXREDIRS => 10,
+                    CURLOPT_TIMEOUT => 30,
+                    CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+                    CURLOPT_CUSTOMREQUEST => "POST",
+                    CURLOPT_POSTFIELDS => $req,
+                    CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
+                ]);
 
-            curl_close($curl);
-            if ($err) {
-                echo "cURL Error #:" . $err;
-                \Log::insert(['Type' => 'HandleChat whatsapp Error', 'content' => "cURL Error #:" . $err]);
+                $response = curl_exec($curl);
+                $err = curl_error($curl);
 
-            } else {
-                \Log::insert(['Type' => 'HandleChat whatsapp success', 'content' => "Done" . $response]);
-                echo 'Done';
+                curl_close($curl);
+                if ($err) {
+                    echo "cURL Error #:" . $err;
+                    \App\Log::insert(['Type' => 'HandleChat whatsapp Error', 'content' => "cURL Error #:" . $err]);
+
+                } else {
+                    \App\Log::insert(['Type' => 'HandleChat whatsapp success', 'content' => "Done" . $response]);
+                    echo 'Done send whatsapp';
+                }
             }
         }
     }
