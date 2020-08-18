@@ -2,10 +2,10 @@
 
 namespace BotMan\Drivers\Whatsapp\Providers;
 
-use BotMan\Drivers\Whatsapp\WhatsappDriver;
+use App\WhatsApp\WhatsappDriver;
+use BotMan\Studio\Providers\StudioServiceProvider;
 use Illuminate\Support\ServiceProvider;
 use BotMan\BotMan\Drivers\DriverManager;
-use BotMan\Studio\Providers\StudioServiceProvider;
 
 class WhatsappServiceProvider extends ServiceProvider
 {
@@ -18,15 +18,8 @@ class WhatsappServiceProvider extends ServiceProvider
     {
         if (! $this->isRunningInBotManStudio()) {
             $this->loadDrivers();
-
-            $this->publishes([
-                __DIR__.'/../../stubs/whatsapp.php' => config_path('botman/whatsapp.php'),
-            ]);
-
-            $this->mergeConfigFrom(__DIR__.'/../../stubs/whatsapp.php', 'botman.whatsapp');
         }
     }
-
     /**
      * Load BotMan drivers.
      */
@@ -34,7 +27,6 @@ class WhatsappServiceProvider extends ServiceProvider
     {
         DriverManager::loadDriver(WhatsappDriver::class);
     }
-
     /**
      * @return bool
      */

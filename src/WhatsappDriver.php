@@ -2,69 +2,31 @@
 
 namespace BotMan\Drivers\Whatsapp;
 
-use BotMan\BotMan\Users\User;
-use Illuminate\Support\Collection;
+use BotMan\Drivers\Whatsapp\Extensions\User;
 use BotMan\BotMan\Drivers\HttpDriver;
-use BotMan\BotMan\Interfaces\WebAccess;
+use BotMan\BotMan\Interfaces\DriverInterface;
+use BotMan\BotMan\Interfaces\UserInterface;
 use BotMan\BotMan\Messages\Incoming\Answer;
-use BotMan\BotMan\Messages\Attachments\File;
-use BotMan\BotMan\Messages\Attachments\Audio;
-use BotMan\BotMan\Messages\Attachments\Image;
-use BotMan\BotMan\Messages\Attachments\Video;
-use BotMan\BotMan\Messages\Outgoing\Question;
-use Symfony\Component\HttpFoundation\Request;
-use BotMan\BotMan\Drivers\Events\GenericEvent;
-use BotMan\Drivers\Whatsapp\Extras\TypingIndicator;
-use Symfony\Component\HttpFoundation\Response;
 use BotMan\BotMan\Messages\Incoming\IncomingMessage;
-use BotMan\BotMan\Messages\Outgoing\OutgoingMessage;
-use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Illuminate\Support\Collection;
+use Symfony\Component\HttpFoundation\ParameterBag;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 class WhatsappDriver extends HttpDriver
 {
+    /**
+     * @const string
+     */
     const DRIVER_NAME = 'Whatsapp';
-
-    const ATTACHMENT_IMAGE = 'image';
-    const ATTACHMENT_AUDIO = 'audio';
-    const ATTACHMENT_VIDEO = 'video';
-    const ATTACHMENT_FILE = 'file';
-    const ATTACHMENT_LOCATION = 'location';
-
-    /** @var OutgoingMessage[] */
-    protected $replies = [];
-
-    /** @var int */
-    protected $replyStatusCode = 200;
-
-    /** @var string */
-    protected $errorMessage = '';
-
-    /** @var array */
+    /**
+     * @var string
+     */
+    protected $endpoint = 'sendMessage';
+    /**
+     * @var array
+     */
     protected $messages = [];
-
-    /** @var array */
-    protected $files = [];
-
-    /**
-     * @param Request $request
-     */
-    public function buildPayload(Request $request)
-    {
-        $this->payload = $request->request->all();
-        $this->event = Collection::make($this->payload);
-        $this->files = Collection::make($request->files->all());
-        $this->config = Collection::make($this->config->get('whatsapp', []));
-    }
-
-    /**
-     * @param IncomingMessage $matchingMessage
-     * @return \BotMan\BotMan\Users\User
-     */
-    public function getUser(IncomingMessage $matchingMessage)
-    {
-        return new User($matchingMessage->getSender());
-    }
-
     /**
      * Determine if the request is for this driver.
      *
@@ -72,89 +34,40 @@ class WhatsappDriver extends HttpDriver
      */
     public function matchesRequest()
     {
-        return Collection::make($this->config->get('matchingData'))->diffAssoc($this->event)->isEmpty();
+        return !is_null($this->payload->get('instanceId'));
     }
 
     /**
-     * @param IncomingMessage $matchingMessage
-     * @return void
-     */
-    public function types(IncomingMessage $matchingMessage)
-    {
-        $this->replies[] = [
-            'message' => TypingIndicator::create(),
-            'additionalParameters' => [],
-        ];
-    }
-
-    /**
-     * Send a typing indicator and wait for the given amount of seconds.
-     * @param IncomingMessage $matchingMessage
-     * @param float $seconds
-     * @return mixed
-     */
-    public function typesAndWaits(IncomingMessage $matchingMessage, float $seconds)
-    {
-        $this->replies[] = [
-            'message' => TypingIndicator::create($seconds),
-            'additionalParameters' => [],
-        ];
-    }
-
-    /**
-     * @param IncomingMessage $message
-     * @return \BotMan\BotMan\Messages\Incoming\Answer
-     */
-    public function getConversationAnswer(IncomingMessage $message)
-    {
-        $interactive = $this->event->get('interactive', false);
-        if (is_string($interactive)) {
-            $interactive = ($interactive !== 'false') && ($interactive !== '0');
-        } else {
-            $interactive = (bool)$interactive;
-        }
-
-        return Answer::create($message->getText())
-            ->setValue($this->event->get('value', $message->getText()))
-            ->setMessage($message)
-            ->setInteractiveReply($interactive);
-    }
-
-    /**
-     * @return bool
-     */
-    public function hasMatchingEvent()
-    {
-        $event = false;
-
-        if ($this->event->has('eventData')) {
-            $event = new GenericEvent($this->event->get('eventData'));
-            $event->setName($this->event->get('eventName'));
-        }
-
-        return $event;
-    }
-
-    /**
-     * Retrieve the chat message.
+     * Retrieve the chat message(s).
      *
      * @return array
      */
     public function getMessages()
     {
         if (empty($this->messages)) {
-            $message = $this->event->get('message');
-            $userId = $this->event->get('userId');
-            $sender = $this->event->get('sender', $userId);
+            $this->loadMessages();
+        }
+        return $this->messages;
+    }
 
-            $incomingMessage = new IncomingMessage($message, $sender, $userId, $this->payload);
-
-            $incomingMessage = $this->addAttachments($incomingMessage);
-
-            $this->messages = [$incomingMessage];
+    /**
+     * @return void
+     */
+    protected function loadMessages()
+    {
+        if ($this->payload->get('messages') !== null) {
+            $messages = collect($this->payload->get('messages'))
+                ->filter(function($value) {
+                    return !$value['fromMe'];
+                })
+                ->map(function($value) {
+                    $message = new IncomingMessage($value['body'], $value['author'], $value['chatId'], $this->payload);
+                    $message->addExtras('userName', $value['senderName']);
+                    return $message;
+                })->toArray();
         }
 
-        return $this->messages;
+        $this->messages = $messages ?? [];
     }
 
     /**
@@ -166,21 +79,44 @@ class WhatsappDriver extends HttpDriver
     }
 
     /**
-     * @param string|Question|OutgoingMessage $message
+     * @return bool
+     */
+    public function isConfigured()
+    {
+        return !empty($this->config->get('url')) && !empty($this->config->get('token'));
+    }
+
+    /**
+     * Retrieve User information.
+     * @param IncomingMessage $matchingMessage
+     * @return UserInterface
+     */
+    public function getUser(IncomingMessage $matchingMessage)
+    {
+        return new User($matchingMessage->getPayload()['author'], $matchingMessage->getSender(), null, null,
+            ['fromMe' => $matchingMessage->getPayload()['fromMe']]);
+    }
+
+    /**
+     * @param IncomingMessage $message
+     * @return \BotMan\BotMan\Messages\Incoming\Answer
+     */
+    public function getConversationAnswer(IncomingMessage $message)
+    {
+        return Answer::create($message->getText())->setMessage($message);
+    }
+
+    /**
+     * @param string|\BotMan\BotMan\Messages\Outgoing\Question $message
      * @param IncomingMessage $matchingMessage
      * @param array $additionalParameters
-     * @return Response
+     * @return array
      */
     public function buildServicePayload($message, $matchingMessage, $additionalParameters = [])
     {
-        if (!$message instanceof WebAccess && !$message instanceof OutgoingMessage) {
-            $this->errorMessage = 'Unsupported message type.';
-            $this->replyStatusCode = 500;
-        }
-
         return [
-            'message' => $message,
-            'additionalParameters' => $additionalParameters,
+            'chatId' => $matchingMessage->getRecipient(),
+            'body' => $message->getText()
         ];
     }
 
@@ -190,44 +126,7 @@ class WhatsappDriver extends HttpDriver
      */
     public function sendPayload($payload)
     {
-        $this->replies[] = $payload;
-    }
-
-    /**
-     * @param $messages
-     * @return array
-     */
-    protected function buildReply($messages)
-    {
-        $replyData = Collection::make($messages)->transform(function ($replyData) {
-            $reply = [];
-            $message = $replyData['message'];
-            $additionalParameters = $replyData['additionalParameters'];
-
-            if ($message instanceof WebAccess) {
-                $reply = $message->toWebDriver();
-            } elseif ($message instanceof OutgoingMessage) {
-                $attachmentData = (is_null($message->getAttachment())) ? null : $message->getAttachment()->toWebDriver();
-                $reply = [
-                    'type' => 'text',
-                    'text' => $message->getText(),
-                    'attachment' => $attachmentData,
-                ];
-            }
-            $reply['additionalParameters'] = $additionalParameters;
-
-            return $reply;
-        })->toArray();
-
-        return $replyData;
-    }
-
-    /**
-     * Send out message response.
-     */
-    public function messagesHandled()
-    {
-        if ($this->payload['driver'] == $this->DRIVER_NAME) {
+        if ($this->payload['driver'] == self::DRIVER_NAME) {
             $messages = $this->buildReply($this->replies);
 
             // Reset replies
@@ -245,7 +144,7 @@ class WhatsappDriver extends HttpDriver
 //            dd('dd');
                 $curl = curl_init();
                 curl_setopt_array($curl, [
-                    CURLOPT_URL => $ch->client->sender_url,
+                    CURLOPT_URL => "https://victorylink.yourwhatsapp.com:4000",
                     CURLOPT_RETURNTRANSFER => true,
                     CURLOPT_ENCODING => "",
                     CURLOPT_MAXREDIRS => 10,
@@ -270,14 +169,21 @@ class WhatsappDriver extends HttpDriver
                 }
             }
         }
+
+//        return $this->http->post($this->buildApiUrl($this->endpoint), [], $payload);
     }
 
     /**
-     * @return bool
+     * @param Request $request
+     * @return void
      */
-    public function isConfigured()
+    public function buildPayload(Request $request)
     {
-        return false;
+        $this->payload = new ParameterBag((array) json_decode($request->getContent(), true));
+        $this->event = Collection::make((array) $this->payload->get('messages'));
+//        $this->signature = $request->headers->get('X_HUB_SIGNATURE', '');
+        $this->content = $request->getContent();
+        $this->config = Collection::make($this->config->get('whatsapp', []));
     }
 
     /**
@@ -290,79 +196,21 @@ class WhatsappDriver extends HttpDriver
      */
     public function sendRequest($endpoint, array $parameters, IncomingMessage $matchingMessage)
     {
-        // Not available with the Whatsapp driver.
+        $parameters = array_replace_recursive([
+            'chatId' => $matchingMessage->getRecipient(),
+        ], $parameters);
+
+        return $this->http->post($this->buildApiUrl($endpoint), [], $parameters);
     }
 
     /**
-     * Add potential attachments to the message object.
-     *
-     * @param IncomingMessage $incomingMessage
-     * @return IncomingMessage
-     */
-    protected function addAttachments($incomingMessage)
-    {
-        $attachment = $this->event->get('attachment');
-
-        if ($attachment === self::ATTACHMENT_IMAGE) {
-            $images = $this->files->map(function ($file) {
-                if ($file instanceof UploadedFile) {
-                    $path = $file->getRealPath();
-                } else {
-                    $path = $file['tmp_name'];
-                }
-
-                return new Image($this->getDataURI($path));
-            })->values()->toArray();
-            $incomingMessage->setText(Image::PATTERN);
-            $incomingMessage->setImages($images);
-        } elseif ($attachment === self::ATTACHMENT_AUDIO) {
-            $audio = $this->files->map(function ($file) {
-                if ($file instanceof UploadedFile) {
-                    $path = $file->getRealPath();
-                } else {
-                    $path = $file['tmp_name'];
-                }
-
-                return new Audio($this->getDataURI($path));
-            })->values()->toArray();
-            $incomingMessage->setText(Audio::PATTERN);
-            $incomingMessage->setAudio($audio);
-        } elseif ($attachment === self::ATTACHMENT_VIDEO) {
-            $videos = $this->files->map(function ($file) {
-                if ($file instanceof UploadedFile) {
-                    $path = $file->getRealPath();
-                } else {
-                    $path = $file['tmp_name'];
-                }
-
-                return new Video($this->getDataURI($path));
-            })->values()->toArray();
-            $incomingMessage->setText(Video::PATTERN);
-            $incomingMessage->setVideos($videos);
-        } elseif ($attachment === self::ATTACHMENT_FILE) {
-            $files = $this->files->map(function ($file) {
-                if ($file instanceof UploadedFile) {
-                    $path = $file->getRealPath();
-                } else {
-                    $path = $file['tmp_name'];
-                }
-
-                return new File($this->getDataURI($path));
-            })->values()->toArray();
-            $incomingMessage->setText(File::PATTERN);
-            $incomingMessage->setFiles($files);
-        }
-
-        return $incomingMessage;
-    }
-
-    /**
-     * @param $file
-     * @param string $mime
+     * @param $endpoint
      * @return string
      */
-    protected function getDataURI($file, $mime = '')
+    protected function buildApiUrl($endpoint)
     {
-        return 'data: ' . (function_exists('mime_content_type') ? mime_content_type($file) : $mime) . ';base64,' . base64_encode(file_get_contents($file));
+        return $this->config->get('url') . $endpoint . '?token=' . $this->config->get('token');
     }
+
+
 }
